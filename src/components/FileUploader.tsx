@@ -151,6 +151,17 @@ export default function FileUploader() {
       return;
     }
 
+    // If file is larger than 1MB, automatically use multipart upload to avoid 413 errors
+    // This prevents hitting reverse proxy (nginx/openresty) size limits
+    // Using a very conservative threshold since 413 errors suggest strict limits
+    const FILE_SIZE_THRESHOLD = 1 * 1024 * 1024; // 1MB - very conservative threshold
+    if (file.size > FILE_SIZE_THRESHOLD) {
+      console.log(`File (${(file.size / 1024 / 1024).toFixed(2)}MB) larger than threshold, using multipart upload`);
+      setIsUploading(false);
+      setProgress(0);
+      return uploadFileMultipart();
+    }
+
     // Determine the final key that will be used
     // Get file extension
     const fileExtension = file.name.split(".").pop() || "";

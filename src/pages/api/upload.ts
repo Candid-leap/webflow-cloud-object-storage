@@ -26,6 +26,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return API.error("Cloud storage not configured", request, 500);
     }
 
+    // Read formData - this matches the original repository pattern
     const formData = await request.formData();
     const file = formData.get("file");
     const customKey = formData.get("key") as string | null;
