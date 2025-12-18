@@ -263,10 +263,21 @@ export default function FileUploader() {
       const apiPath = basePath ? `${basePath}/api/upload` : '/api/upload';
       const response = await fetch(apiPath, {
         method: "POST",
+        credentials: 'include',
         body: formData,
       });
 
+      // If we get a 413 error (file too large), automatically fallback to multipart upload
+      if (response.status === 413) {
+        console.log("File too large for simple upload, switching to multipart upload");
+        setIsUploading(false);
+        setProgress(0);
+        return uploadFileMultipart();
+      }
+
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Upload failed:", response.status, errorText);
         throw new Error("Upload failed");
       }
 
@@ -359,8 +370,9 @@ export default function FileUploader() {
     setProgress(0);
 
     try {
-      const assetsPrefix = import.meta.env.ASSETS_PREFIX || "";
-      const BASE_CF_URL = `${assetsPrefix}/api/multipart-upload`;
+      // Use base path for API calls, not ASSETS_PREFIX (which might be a different domain)
+      const basePath = getBasePath();
+      const BASE_CF_URL = basePath ? `${basePath}/api/multipart-upload` : '/api/multipart-upload';
       // Use custom key if provided, otherwise use file name
       // Use folderPath if provided, otherwise use currentFolder
       const targetFolder = folderPath.trim() || currentFolder;
@@ -398,12 +410,15 @@ export default function FileUploader() {
       const totalParts = Math.ceil(file.size / CHUNK_SIZE);
 
       // Step 1: Initiate upload
-      const createUploadUrl = new URL(BASE_CF_URL, window.location.origin);
-      createUploadUrl.searchParams.append("action", "create");
+      // Construct full URL using current origin
+      const createUploadUrl = BASE_CF_URL.startsWith('http')
+        ? `${BASE_CF_URL}?action=create`
+        : `${window.location.origin}${BASE_CF_URL}?action=create`;
 
       const createResponse = await fetch(createUploadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include',
         body: JSON.stringify({ key, contentType: file.type }),
       });
 
@@ -412,10 +427,9 @@ export default function FileUploader() {
 
       // Step 2: Upload parts
       const partsData = [];
-      const uploadPartUrl = new URL(BASE_CF_URL, window.location.origin);
-      uploadPartUrl.searchParams.append("action", "upload-part");
-      uploadPartUrl.searchParams.append("uploadId", uploadId);
-      uploadPartUrl.searchParams.append("key", key);
+      const baseUploadUrl = BASE_CF_URL.startsWith('http')
+        ? BASE_CF_URL
+        : `${window.location.origin}${BASE_CF_URL}`;
 
       for (let i = 0; i < totalParts; i++) {
         const start = CHUNK_SIZE * i;
@@ -423,10 +437,11 @@ export default function FileUploader() {
         const blob = file.slice(start, end);
         const partNumber = i + 1;
 
-        uploadPartUrl.searchParams.set("partNumber", partNumber.toString());
+        const uploadPartUrl = `${baseUploadUrl}?action=upload-part&uploadId=${encodeURIComponent(uploadId)}&key=${encodeURIComponent(key)}&partNumber=${partNumber}`;
 
         const uploadPartResponse = await fetch(uploadPartUrl, {
           method: "PUT",
+          credentials: 'include',
           body: blob,
         });
 
@@ -443,12 +458,14 @@ export default function FileUploader() {
       }
 
       // Step 3: Complete upload
-      const completeUploadUrl = new URL(BASE_CF_URL, window.location.origin);
-      completeUploadUrl.searchParams.append("action", "complete");
+      const completeUploadUrl = BASE_CF_URL.startsWith('http')
+        ? `${BASE_CF_URL}?action=complete`
+        : `${window.location.origin}${BASE_CF_URL}?action=complete`;
 
       const completeResponse = await fetch(completeUploadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include',
         body: JSON.stringify({
           uploadId,
           key,

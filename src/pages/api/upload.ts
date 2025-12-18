@@ -3,8 +3,8 @@ import { API } from "../../utils/api";
 import { isAuthenticated } from "../../utils/auth";
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  // Set the origin for the API
-  API.init((locals.runtime as any).env.BASE_URL);
+  // Set the origin for the API - use ORIGIN from env for CORS
+  API.init((locals.runtime as any).env.ORIGIN);
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {

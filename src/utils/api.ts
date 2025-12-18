@@ -78,7 +78,12 @@ export const API = {
   },
 
   // Check if origin is allowed
-  isAllowedOrigin: (origin: string): boolean => {
+  isAllowedOrigin: (origin: string | null): boolean => {
+    if (!origin) return false;
+    // Allow any webflow.io domain
+    if (origin.includes('.webflow.io') || origin.includes('webflow.io')) {
+      return true;
+    }
     return API.allowedOrigins.includes(origin);
   },
 
