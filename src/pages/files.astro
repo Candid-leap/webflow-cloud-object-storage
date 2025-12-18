@@ -1,11 +1,30 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import { isAuthenticated } from '../utils/auth';
 
 // Get the assets prefix from environment
 const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
+// Normalize base path (remove trailing slash if present, except for root)
+const rawBasePath = import.meta.env.BASE_URL || '';
+const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
+const env = Astro.locals.runtime?.env || {};
+
+// Check authentication
+const authenticated = await isAuthenticated(Astro.request, env);
+
+if (!authenticated) {
+	return Astro.redirect(`${basePath}/login`, 302);
+}
 ---
 
 <Layout title="File Uploader">
+	<!-- Logout Button - Top Right -->
+	<div style="position: fixed; top: 16px; right: 16px; z-index: 10000;">
+		<button class="btn btn-outline btn-sm btn-error" id="logoutBtnTop">
+			Logout
+		</button>
+	</div>
+	
 	<div class="container mx-auto p-6 max-w-6xl">
 		<h1 class="text-4xl font-bold text-center mb-8">File Uploader</h1>
 		
@@ -25,6 +44,32 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 							class="file-input file-input-bordered w-full" 
 							accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.rar"
 						/>
+					</div>
+					
+					<div class="form-control">
+						<label class="label">
+							<span class="label-text">Custom URL/Key (optional) <span id="replacingIndicator" class="text-primary hidden"></span></span>
+						</label>
+						<input 
+							type="text" 
+							id="customKeyInput"
+							placeholder="e.g., my-document.pdf (leave empty for auto-generated name)"
+							class="input input-bordered w-full"
+						/>
+						<label class="label">
+							<span class="label-text-alt">Leave empty for auto-generated name, or specify a custom key to use the same URL. If a file with this key exists, it will be replaced.</span>
+						</label>
+						<div id="cancelReplaceBtn" class="hidden mt-2">
+							<button type="button" class="btn btn-sm btn-ghost" onclick="
+								document.getElementById('customKeyInput').value = '';
+								document.getElementById('customKeyInput').disabled = false;
+								document.getElementById('replacingIndicator').classList.add('hidden');
+								document.getElementById('cancelReplaceBtn').classList.add('hidden');
+								replacingKey = null;
+							">
+								Cancel Replace
+							</button>
+						</div>
 					</div>
 					
 					<div class="form-control">
@@ -48,12 +93,20 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 		<!-- Files Section -->
 		<div class="card bg-base-100 shadow-xl">
 			<div class="card-body">
-				<div class="flex justify-between items-center mb-4">
+				<div class="flex justify-between items-center mb-4 flex-wrap gap-4">
 					<h2 class="card-title text-2xl">Uploaded Files</h2>
-					<button class="btn btn-outline btn-sm" id="refreshBtn">
-						<span class="loading loading-spinner loading-sm hidden" id="refreshSpinner"></span>
-						Refresh
-					</button>
+					<div class="flex gap-2 items-center">
+						<input 
+							type="text" 
+							id="searchInput"
+							placeholder="Search files..." 
+							class="input input-bordered input-sm w-48"
+						/>
+						<button class="btn btn-outline btn-sm" id="refreshBtn">
+							<span class="loading loading-spinner loading-sm hidden" id="refreshSpinner"></span>
+							Refresh
+						</button>
+					</div>
 				</div>
 				
 				<div id="filesList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -76,11 +129,15 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 </Layout>
 
 <script>
+	// Normalize base path for API calls
+	const rawBasePath = import.meta.env.BASE_URL || '';
+	const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 	const assetsPrefix = '${assetsPrefix}';
 	
 	// DOM elements
 	const uploadForm = document.getElementById('uploadForm') as HTMLFormElement;
 	const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+	const customKeyInput = document.getElementById('customKeyInput') as HTMLInputElement;
 	const uploadBtn = document.getElementById('uploadBtn') as HTMLButtonElement;
 	const uploadSpinner = document.getElementById('uploadSpinner') as HTMLElement;
 	const uploadProgress = document.getElementById('uploadProgress') as HTMLElement;
@@ -91,6 +148,12 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 	const noFiles = document.getElementById('noFiles') as HTMLElement;
 	const refreshBtn = document.getElementById('refreshBtn') as HTMLButtonElement;
 	const refreshSpinner = document.getElementById('refreshSpinner') as HTMLElement;
+	
+	// State
+	let replacingKey: string | null = null;
+	let renamingKey: string | null = null;
+	let newFileName: string = '';
+	let searchQuery: string = '';
 
 	// File type icons mapping
 	const fileIcons: Record<string, string> = {
@@ -150,9 +213,11 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 
 	// File interface
 	interface FileItem {
-		name: string;
-		link: string;
-		dateUploaded: string;
+		name?: string;
+		key?: string;
+		link?: string;
+		dateUploaded?: string;
+		uploaded?: string;
 	}
 
 	// Load and display files
@@ -161,7 +226,8 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 			loadingFiles.classList.remove('hidden');
 			filesList.innerHTML = '';
 			
-			const response = await fetch(`${assetsPrefix}/api/list-assets`);
+			const apiPath = basePath ? `${basePath}/api/list-assets` : '/api/list-assets';
+			const response = await fetch(apiPath);
 			if (!response.ok) {
 				throw new Error('Failed to load files');
 			}
@@ -177,31 +243,223 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 			
 			noFiles.classList.add('hidden');
 			
-			files.forEach((file: FileItem) => {
+			// Filter files based on search query
+			const filteredFiles = files.filter((file: FileItem) => {
+				if (!searchQuery.trim()) return true;
+				const fileName = file.name || file.key || '';
+				const fileKey = file.key || file.name || '';
+				return fileName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+					   fileKey.toLowerCase().includes(searchQuery.toLowerCase());
+			});
+			
+			if (filteredFiles.length === 0 && searchQuery.trim()) {
+				filesList.innerHTML = `
+					<div class="col-span-full text-center py-8">
+						<div class="text-6xl mb-4">🔍</div>
+						<p class="text-lg">No results found</p>
+						<p class="text-sm text-base-content/70">Try a different search term</p>
+					</div>
+				`;
+				return;
+			}
+			
+			filteredFiles.forEach((file: FileItem) => {
+				const fileName = file.name || file.key || 'Unknown file';
+				const fileKey = file.key || file.name || '';
+				const apiPath = basePath ? `${basePath}/api/asset` : '/api/asset';
+				const fileLink = file.link || (fileKey ? `${apiPath}?key=${encodeURIComponent(fileKey)}` : '');
+				const uploadDate = file.dateUploaded || file.uploaded || new Date().toISOString();
+				
 				const fileCard = document.createElement('div');
 				fileCard.className = 'card bg-base-200 shadow-sm hover:shadow-md transition-shadow';
 				
-				const isImageFile = isImage(file.name);
+				const isImageFile = isImage(fileName);
+				const cardId = `file-card-${fileKey.replace(/[^a-zA-Z0-9]/g, '-')}`;
+				fileCard.id = cardId;
 				
 				fileCard.innerHTML = `
 					<figure class="px-4 pt-4">
 						${isImageFile 
-							? `<img src="${file.link}" alt="${file.name}" class="rounded-xl h-32 w-full object-cover" />`
+							? `<img src="${fileLink}" alt="${fileName}" class="rounded-xl h-32 w-full object-cover" />`
 							: `<div class="flex items-center justify-center h-32 w-full bg-base-300 rounded-xl">
-									<span class="text-4xl">${getFileIcon(file.name)}</span>
+									<span class="text-4xl">${getFileIcon(fileName)}</span>
 							   </div>`
 						}
 					</figure>
 					<div class="card-body p-4">
-						<h3 class="card-title text-sm truncate" title="${file.name}">${file.name}</h3>
-						<p class="text-xs text-base-content/70">${formatDate(file.dateUploaded)}</p>
-						<div class="card-actions justify-end mt-2">
-							<a href="${file.link}" target="_blank" class="btn btn-primary btn-xs">
+						<div id="file-name-${cardId}" class="card-title text-sm truncate" title="${fileName}">${fileName}</div>
+						<div id="rename-input-${cardId}" class="hidden">
+							<input type="text" id="rename-text-${cardId}" value="${fileName}" class="input input-sm input-bordered w-full mb-2" />
+							<div class="flex gap-2">
+								<button class="btn btn-success btn-xs save-rename-btn" data-key="${fileKey}">Save</button>
+								<button class="btn btn-ghost btn-xs cancel-rename-btn" data-key="${fileKey}">Cancel</button>
+							</div>
+						</div>
+						<p class="text-xs text-base-content/70">${formatDate(uploadDate)}</p>
+						<div class="card-actions justify-end mt-2 gap-2">
+							<a href="${fileLink}" target="_blank" class="btn btn-primary btn-xs">
 								View
 							</a>
+							<button class="btn btn-secondary btn-xs copy-url-btn" data-key="${fileKey}">
+								Copy URL
+							</button>
+							<button class="btn btn-success btn-xs rename-btn" data-key="${fileKey}" data-name="${fileName}">
+								Rename
+							</button>
+							<button class="btn btn-warning btn-xs replace-btn" data-key="${fileKey}">
+								Replace
+							</button>
+							<button class="btn btn-error btn-xs delete-btn" data-key="${fileKey}" data-name="${fileName}">
+								Delete
+							</button>
 						</div>
 					</div>
 				`;
+				
+				// Add event listener for replace button
+				const replaceBtn = fileCard.querySelector('.replace-btn') as HTMLButtonElement;
+				if (replaceBtn) {
+					replaceBtn.addEventListener('click', () => {
+						replacingKey = fileKey;
+						customKeyInput.value = fileKey;
+						customKeyInput.disabled = true;
+						fileInput.value = '';
+						const replacingIndicator = document.getElementById('replacingIndicator');
+						const cancelReplaceBtn = document.getElementById('cancelReplaceBtn');
+						if (replacingIndicator) {
+							replacingIndicator.textContent = `(Replacing: ${fileKey})`;
+							replacingIndicator.classList.remove('hidden');
+						}
+						if (cancelReplaceBtn) {
+							cancelReplaceBtn.classList.remove('hidden');
+						}
+						// Scroll to upload section
+						uploadForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					});
+				}
+				
+				// Add event listener for rename button
+				const renameBtn = fileCard.querySelector('.rename-btn') as HTMLButtonElement;
+				if (renameBtn) {
+					renameBtn.addEventListener('click', () => {
+						const nameDiv = fileCard.querySelector(`#file-name-${cardId}`) as HTMLElement;
+						const renameDiv = fileCard.querySelector(`#rename-input-${cardId}`) as HTMLElement;
+						const renameInput = fileCard.querySelector(`#rename-text-${cardId}`) as HTMLInputElement;
+						if (nameDiv && renameDiv && renameInput) {
+							nameDiv.classList.add('hidden');
+							renameDiv.classList.remove('hidden');
+							renameInput.focus();
+							renameInput.select();
+						}
+					});
+				}
+				
+				// Add event listener for save rename button
+				const saveRenameBtn = fileCard.querySelector('.save-rename-btn') as HTMLButtonElement;
+				if (saveRenameBtn) {
+					saveRenameBtn.addEventListener('click', async () => {
+						const renameInput = fileCard.querySelector(`#rename-text-${cardId}`) as HTMLInputElement;
+						const newName = renameInput?.value.trim();
+						if (!newName) {
+							alert('Please enter a new file name');
+							return;
+						}
+						
+						try {
+							const apiPath = basePath ? `${basePath}/api/rename-asset` : '/api/rename-asset';
+							const response = await fetch(apiPath, {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ oldKey: fileKey, newKey: newName })
+							});
+							
+							if (!response.ok) {
+								const error = await response.json();
+								throw new Error(error.error || 'Failed to rename file');
+							}
+							
+							alert('File renamed successfully!');
+							loadFiles();
+						} catch (error) {
+							console.error('Rename failed:', error);
+							alert(error instanceof Error ? error.message : 'Failed to rename file');
+						}
+					});
+				}
+				
+				// Add event listener for cancel rename button
+				const cancelRenameBtn = fileCard.querySelector('.cancel-rename-btn') as HTMLButtonElement;
+				if (cancelRenameBtn) {
+					cancelRenameBtn.addEventListener('click', () => {
+						const nameDiv = fileCard.querySelector(`#file-name-${cardId}`) as HTMLElement;
+						const renameDiv = fileCard.querySelector(`#rename-input-${cardId}`) as HTMLElement;
+						if (nameDiv && renameDiv) {
+							nameDiv.classList.remove('hidden');
+							renameDiv.classList.add('hidden');
+						}
+					});
+				}
+				
+				// Add event listener for delete button
+				const deleteBtn = fileCard.querySelector('.delete-btn') as HTMLButtonElement;
+				if (deleteBtn) {
+					deleteBtn.addEventListener('click', async () => {
+						if (!confirm(`Are you sure you want to delete "${fileName}"?`)) {
+							return;
+						}
+						
+						try {
+							const apiPath = basePath ? `${basePath}/api/delete-asset?key=${encodeURIComponent(fileKey)}` : `/api/delete-asset?key=${encodeURIComponent(fileKey)}`;
+							const response = await fetch(apiPath, {
+								method: 'DELETE'
+							});
+							
+							if (!response.ok) {
+								throw new Error('Failed to delete file');
+							}
+							
+							alert('File deleted successfully!');
+							loadFiles();
+						} catch (error) {
+							console.error('Delete failed:', error);
+							alert('Failed to delete file. Please try again.');
+						}
+					});
+				}
+				
+				// Handle Enter key in rename input
+				const renameInput = fileCard.querySelector(`#rename-text-${cardId}`) as HTMLInputElement;
+				if (renameInput) {
+					renameInput.addEventListener('keydown', (e) => {
+						if (e.key === 'Enter') {
+							saveRenameBtn?.click();
+						} else if (e.key === 'Escape') {
+							cancelRenameBtn?.click();
+						}
+					});
+				}
+				
+				// Add event listener for copy URL button
+				const copyUrlBtn = fileCard.querySelector('.copy-url-btn') as HTMLButtonElement;
+				if (copyUrlBtn) {
+					copyUrlBtn.addEventListener('click', async () => {
+						try {
+							// Get current hostname and path
+							const currentOrigin = window.location.origin;
+							const basePath = assetsPrefix || '';
+							const apiPath = basePath ? `${basePath}/api/asset` : '/api/asset';
+							const fullUrl = `${currentOrigin}${apiPath}?key=${encodeURIComponent(fileKey)}`;
+							
+							await navigator.clipboard.writeText(fullUrl);
+							
+							// Show toast
+							showToast('URL copied to clipboard!');
+						} catch (error) {
+							console.error('Failed to copy URL:', error);
+							showToast('Failed to copy URL');
+						}
+					});
+				}
 				
 				filesList.appendChild(fileCard);
 			});
@@ -239,12 +497,23 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 				const formData = new FormData();
 				formData.append('file', file);
 				
+				// Add custom key if provided (use the same key for all files if replacing, or individual keys)
+				const customKey = customKeyInput.value.trim();
+				if (customKey) {
+					// If replacing, use the same key; otherwise, append index for multiple files
+					const keyToUse = replacingKey || (files.length > 1 ? `${customKey}-${i}` : customKey);
+					formData.append('key', keyToUse);
+				}
+				
 				// Update progress
 				const progress = ((i + 1) / files.length) * 100;
 				progressBar.style.width = `${progress}%`;
-				progressText.textContent = `Uploading ${file.name}...`;
+				progressText.textContent = replacingKey 
+					? `Replacing file with key: ${replacingKey}...`
+					: `Uploading ${file.name}...`;
 				
-				const response = await fetch(`${assetsPrefix}/api/upload`, {
+				const apiPath = basePath ? `${basePath}/api/upload` : '/api/upload';
+				const response = await fetch(apiPath, {
 					method: 'POST',
 					body: formData
 				});
@@ -255,11 +524,23 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 			}
 			
 			// Success
-			progressText.textContent = 'Upload completed!';
+			progressText.textContent = replacingKey ? 'File replaced successfully!' : 'Upload completed!';
 			progressBar.style.width = '100%';
 			
 			// Reset form
 			fileInput.value = '';
+			customKeyInput.value = '';
+			customKeyInput.disabled = false;
+			replacingKey = null;
+			const replacingIndicator = document.getElementById('replacingIndicator');
+			const cancelReplaceBtn = document.getElementById('cancelReplaceBtn');
+			if (replacingIndicator) {
+				replacingIndicator.textContent = '';
+				replacingIndicator.classList.add('hidden');
+			}
+			if (cancelReplaceBtn) {
+				cancelReplaceBtn.classList.add('hidden');
+			}
 			
 			// Reload files list
 			setTimeout(() => {
@@ -278,6 +559,23 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 		}
 	}
 
+	// Search input
+	const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+	if (searchInput) {
+		searchInput.addEventListener('input', () => {
+			searchQuery = searchInput.value;
+			loadFiles();
+		});
+	}
+
+	// Logout function - clear the cookie and refresh the page
+	function handleLogout() {
+		// Clear the JWT cookie
+		document.cookie = "webflow_jwt_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+		// Refresh the page (will redirect to login due to auth check)
+		window.location.reload();
+	}
+
 	// Event listeners
 	uploadForm.addEventListener('submit', handleUpload);
 	refreshBtn.addEventListener('click', () => {
@@ -286,7 +584,60 @@ const assetsPrefix = Astro.locals.runtime?.env?.ASSETS_PREFIX || '/app';
 			refreshSpinner.classList.add('hidden');
 		});
 	});
+	
+
+	// Toast notification function
+	function showToast(message: string) {
+		// Remove existing toast if any
+		const existingToast = document.getElementById('toast-notification');
+		if (existingToast) {
+			existingToast.remove();
+		}
+		
+		// Create toast element
+		const toast = document.createElement('div');
+		toast.id = 'toast-notification';
+		toast.className = 'fixed bottom-4 right-4 bg-success text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-slide-in';
+		toast.innerHTML = `
+			<span class="text-xl">✓</span>
+			<span>${message}</span>
+		`;
+		
+		document.body.appendChild(toast);
+		
+		// Remove toast after 3 seconds
+		setTimeout(() => {
+			toast.style.animation = 'slide-out 0.3s ease';
+			setTimeout(() => {
+				toast.remove();
+			}, 300);
+		}, 3000);
+	}
 
 	// Load files on page load
 	loadFiles();
 </script>
+
+<style>
+	@keyframes slide-in {
+		from {
+			transform: translateX(100%);
+			opacity: 0;
+		}
+		to {
+			transform: translateX(0);
+			opacity: 1;
+		}
+	}
+	
+	@keyframes slide-out {
+		from {
+			transform: translateX(0);
+			opacity: 1;
+		}
+		to {
+			transform: translateX(100%);
+			opacity: 0;
+		}
+	}
+</style>

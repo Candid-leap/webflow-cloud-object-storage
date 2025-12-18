@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { API } from "../../utils/api";
+import { isAuthenticated } from "../../utils/auth";
 
 interface MultipartUploadRequest {
   key: string;
@@ -28,12 +29,19 @@ async function parseRequestData(
 // Creates and completes a new multipart upload session
 export const POST: APIRoute = async ({ request, locals }) => {
   // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  API.init((locals.runtime as any).env.BASE_URL);
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
     console.log("CORS preflight request from:", request.headers.get("Origin"));
     return API.cors(request);
+  }
+
+  // Check authentication
+  const env = (locals.runtime as any).env;
+  const authenticated = await isAuthenticated(request, env);
+  if (!authenticated) {
+    return API.error("Authentication required", request, 401);
   }
 
   try {
@@ -141,12 +149,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
 // Uploads individual parts of a multipart upload
 export const PUT: APIRoute = async ({ request, locals }) => {
   // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  API.init((locals.runtime as any).env.BASE_URL);
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
     console.log("CORS preflight request from:", request.headers.get("Origin"));
     return API.cors(request);
+  }
+
+  // Check authentication
+  const env = (locals.runtime as any).env;
+  const authenticated = await isAuthenticated(request, env);
+  if (!authenticated) {
+    return API.error("Authentication required", request, 401);
   }
 
   try {
@@ -211,7 +226,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
 // Aborts a multipart upload
 export const DELETE: APIRoute = async ({ request, locals }) => {
   // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  API.init((locals.runtime as any).env.BASE_URL);
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
@@ -267,6 +282,6 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
 
 export const OPTIONS: APIRoute = async ({ request, locals }) => {
   // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  API.init((locals.runtime as any).env.BASE_URL);
   return API.cors(request);
 };

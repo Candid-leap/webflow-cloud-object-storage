@@ -1,0 +1,24 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const basePath = import.meta.env.BASE_URL || '';
+---
+
+<Layout title="Unauthorized">
+	<div class="container mx-auto p-6 max-w-md">
+		<div class="card bg-base-100 shadow-xl">
+			<div class="card-body text-center">
+				<h1 class="text-3xl font-bold mb-4">Unauthorized</h1>
+				<p class="text-base-content/70 mb-6">
+					You are not authorized to access this application. Please contact your administrator.
+				</p>
+				<div class="flex justify-center gap-4">
+					<a href={`${basePath}/login`} class="btn btn-primary">
+						Try Again
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+</Layout>
+

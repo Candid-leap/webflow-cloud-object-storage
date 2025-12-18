@@ -57,7 +57,7 @@ export const API = {
           status: 200,
           headers: {
             ...API.corsHeaders,
-            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Origin": origin || "",
           },
         });
       }
