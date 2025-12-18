@@ -589,11 +589,42 @@ export default function FileUploader() {
     <div style={{ padding: "20px", maxWidth: "800px", margin: "0 auto", position: "relative" }}>
       {/* Logout Button - Top Right */}
       <button
-        onClick={() => {
-          // Clear the JWT cookie
-          document.cookie = "webflow_jwt_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-          // Refresh the page (will redirect to login due to auth check)
-          window.location.reload();
+        onClick={async () => {
+          try {
+            // Get base path for API call and redirect
+            const rawBasePath = import.meta.env.BASE_URL || '';
+            const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
+            const logoutPath = basePath ? `${basePath}/api/auth/logout` : '/api/auth/logout';
+
+            // Call logout endpoint to clear httpOnly cookie
+            // Use credentials: 'include' to ensure cookies are sent
+            const response = await fetch(logoutPath, {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+
+            // Wait for the response to ensure cookie is cleared
+            if (response.ok) {
+              // Cookie is now cleared, redirect to login
+              const loginPath = basePath ? `${basePath}/login` : '/login';
+              window.location.href = loginPath;
+            } else {
+              console.error('Logout failed:', response.status, response.statusText);
+              // Even if logout fails, redirect to login (auth check will handle it)
+              const loginPath = basePath ? `${basePath}/login` : '/login';
+              window.location.href = loginPath;
+            }
+          } catch (error) {
+            console.error('Logout error:', error);
+            // Fallback: redirect to login (auth check will handle it)
+            const rawBasePath = import.meta.env.BASE_URL || '';
+            const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
+            const loginPath = basePath ? `${basePath}/login` : '/login';
+            window.location.href = loginPath;
+          }
         }}
         style={{
           position: "fixed",
@@ -1265,10 +1296,11 @@ export default function FileUploader() {
                     return folderName.toLowerCase().includes(searchQuery.toLowerCase());
                   })
                   .map((folder) => {
-                    const folderName = folder.split("/").pop() || folder;
-                    const fullPath = currentFolder
-                      ? `${currentFolder}/${folderName}`
-                      : folderName;
+                    // The folder from API is already the full path (e.g., "folder1/folder2")
+                    // Remove trailing slash if present
+                    const folderPath = folder.replace(/\/$/, "");
+                    // Extract just the display name (last part of the path)
+                    const folderName = folderPath.split("/").pop() || folderPath;
                     return (
                       <div
                         key={folder}
@@ -1291,7 +1323,7 @@ export default function FileUploader() {
                       >
                         <div 
                           style={{ padding: "1rem", textAlign: "center", cursor: "pointer" }}
-                          onClick={() => setCurrentFolder(fullPath)}
+                          onClick={() => setCurrentFolder(folderPath)}
                         >
                           <div
                             style={{
@@ -1301,7 +1333,7 @@ export default function FileUploader() {
                           >
                             📁
                           </div>
-                          {renamingFolder === folder ? (
+                          {renamingFolder === folderPath ? (
                             <input
                               type="text"
                               value={newFolderName}
@@ -1309,7 +1341,8 @@ export default function FileUploader() {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter" && newFolderName.trim()) {
                                   // Rename logic - update folder path
-                                  const parentPath = currentFolder.split("/").slice(0, -1).join("/");
+                                  // Get parent path from the current folder path
+                                  const parentPath = folderPath.split("/").slice(0, -1).join("/");
                                   const newFolderPath = parentPath
                                     ? `${parentPath}/${newFolderName.trim()}`
                                     : newFolderName.trim();
@@ -1363,11 +1396,12 @@ export default function FileUploader() {
                           style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", justifyContent: "center", padding: "0 1rem 1rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {renamingFolder === folder ? (
+                          {renamingFolder === folderPath ? (
                             <>
                               <button
                                 onClick={() => {
-                                  const parentPath = currentFolder.split("/").slice(0, -1).join("/");
+                                  // Get parent path from the current folder path
+                                  const parentPath = folderPath.split("/").slice(0, -1).join("/");
                                   const newFolderPath = parentPath
                                     ? `${parentPath}/${newFolderName.trim()}`
                                     : newFolderName.trim();
@@ -1410,7 +1444,7 @@ export default function FileUploader() {
                             <>
                               <button
                                 onClick={() => {
-                                  setRenamingFolder(folder);
+                                    setRenamingFolder(folderPath);
                                   setNewFolderName(folderName);
                                 }}
                                 style={{
@@ -1432,7 +1466,7 @@ export default function FileUploader() {
                                   try {
                                     const folderFiles = files.filter((f) => {
                                       const fKey = f.key || "";
-                                      return fKey.startsWith(folder + "/");
+                                      return fKey.startsWith(folderPath + "/");
                                     });
                                     const deletePromises = folderFiles.map(async (f) => {
                                       const basePath = getBasePath();

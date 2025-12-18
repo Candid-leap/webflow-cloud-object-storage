@@ -5,7 +5,8 @@ import { isAuthenticated } from '../utils/auth';
 
 const env = Astro.locals.runtime?.env || {};
 // Get base path and normalize it (remove trailing slash if present, except for root)
-const rawBasePath = import.meta.env.BASE_URL || '';
+const rawBasePath = env.BASE_URL || '';
+console.log('rawBasePath', rawBasePath);
 const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 
 // Check authentication

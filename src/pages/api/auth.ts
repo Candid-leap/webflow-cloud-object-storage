@@ -9,20 +9,21 @@ import {
 
 export const GET: APIRoute = async ({ request, locals, redirect }) => {
   try {
-    console.log('OAuth callback request received', request.url);
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
 
     const env = (locals.runtime as any).env;
-    const basePath = import.meta.env.BASE_URL || '';
+    // Normalize base path (remove trailing slash if present, except for root)
+    const rawBasePath = import.meta.env.BASE_URL || '';
+    const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 
     // Handle OAuth error from Webflow
     if (error) {
       const errorDescription =
         url.searchParams.get('error_description') || error;
       return redirect(
-        `${basePath}/files?error=${encodeURIComponent(errorDescription)}`,
+        `${basePath}/login?error=${encodeURIComponent(errorDescription)}`,
         302
       );
     }
@@ -59,18 +60,25 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
     }
 
     // Create JWT with site ID and set cookie
-    // Redirect to the base path (index page)
-    const response = redirect(
-      `${basePath}`,
-      302
-    );
+    // Build redirect URL - use absolute URL to ensure proper redirect
+    // Reuse the existing url variable from line 12
+    const origin = url.origin;
+    const redirectPath = basePath || '/';
+    const redirectUrl = `${origin}${redirectPath}`;
+
+    // Create redirect response
+    const response = new Response(null, {
+      status: 302,
+      headers: {
+        'Location': redirectUrl,
+      },
+    });
     
     // Set cookie on the redirect response
     await setTokenWithPayload(response.headers, { site_id: siteId }, env);
 
     return response;
   } catch (err) {
-    console.error('OAuth callback error:', err);
     const errorMessage =
       err instanceof Error
         ? err.message
@@ -80,9 +88,11 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
           ? (err as { response?: { data?: { error_description?: string } } })
               .response?.data?.error_description || 'Unknown error'
           : 'Unknown error';
-    const basePath = import.meta.env.BASE_URL || '';
+    // Normalize base path (remove trailing slash if present, except for root)
+    const rawBasePath = import.meta.env.BASE_URL || '';
+    const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
     return redirect(
-      `${basePath}/files?error=${encodeURIComponent(errorMessage)}`,
+      `${basePath}/login?error=${encodeURIComponent(errorMessage)}`,
       302
     );
   }

@@ -1,9 +1,9 @@
 import type { APIRoute } from 'astro';
-import { clearAccessToken } from '../../../../utils/auth';
-import { API } from '../../../../utils/api';
+import { clearAccessToken } from '../../../utils/auth';
+import { API } from '../../../utils/api';
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  API.init((locals.runtime as any).env.BASE_URL);
+  API.init((locals.runtime as any).env.ORIGIN);
 
   if (request.method === 'OPTIONS') {
     return API.cors(request);
