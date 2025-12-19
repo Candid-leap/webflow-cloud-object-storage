@@ -14,9 +14,22 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
     const error = url.searchParams.get('error');
 
     const env = (locals.runtime as any).env;
+    // Get base path - check env.BASE_URL first (might be full URL), then fall back to import.meta.env.BASE_URL
+    let rawBasePath = '';
+    if (env.BASE_URL) {
+      // If BASE_URL is a full URL, extract the pathname
+      try {
+        const baseUrlObj = new URL(env.BASE_URL);
+        rawBasePath = baseUrlObj.pathname;
+      } catch (e) {
+        // If it's not a valid URL, treat it as a path
+        rawBasePath = env.BASE_URL;
+      }
+    } else {
+      // Fall back to Astro's BASE_URL from astro.config.mjs
+      rawBasePath = import.meta.env.BASE_URL || '';
+    }
     // Normalize base path (remove trailing slash if present, except for root)
-    // Use import.meta.env.BASE_URL which is set by Astro from astro.config.mjs
-    const rawBasePath = import.meta.env.BASE_URL || '';
     const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 
     // Handle OAuth error from Webflow
@@ -95,8 +108,26 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
           ? (err as { response?: { data?: { error_description?: string } } })
               .response?.data?.error_description || 'Unknown error'
           : 'Unknown error';
+
+    // Get env again in case it wasn't set in the try block
+    const env = (locals.runtime as any).env || {};
+
+    // Get base path - check env.BASE_URL first (might be full URL), then fall back to import.meta.env.BASE_URL
+    let rawBasePath = '';
+    if (env.BASE_URL) {
+      // If BASE_URL is a full URL, extract the pathname
+      try {
+        const baseUrlObj = new URL(env.BASE_URL);
+        rawBasePath = baseUrlObj.pathname;
+      } catch (e) {
+        // If it's not a valid URL, treat it as a path
+        rawBasePath = env.BASE_URL;
+      }
+    } else {
+      // Fall back to Astro's BASE_URL from astro.config.mjs
+      rawBasePath = import.meta.env.BASE_URL || '';
+    }
     // Normalize base path (remove trailing slash if present, except for root)
-    const rawBasePath = import.meta.env.BASE_URL || '';
     const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
     return redirect(
       `${basePath}/login?error=${encodeURIComponent(errorMessage)}`,
