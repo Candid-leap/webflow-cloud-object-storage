@@ -14,7 +14,7 @@ const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 const authenticated = await isAuthenticated(Astro.request, env);
 
 if (!authenticated) {
-	return Astro.redirect(`${basePath}/login`, 302);
+	return Astro.redirect(`${basePath}/app/login`, 302);
 }
 ---
 
