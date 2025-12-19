@@ -417,10 +417,20 @@ export default function FileUploader() {
           ? `${targetFolder}/${fileName}`
           : fileName;
       }
-      // Use smaller chunks (2MB) to stay well under limits and avoid URL size issues
+      // R2 multipart upload requires minimum 5MB per part (except last part)
       // Webflow Cloud limits: 500MB request body, 16KB URL, 30s timeout
-      const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB - safer chunk size
+      // Use 5MB chunks to meet R2 minimum, but ensure we stay under Webflow limits
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB - R2 minimum part size
       const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+      
+      // If file is smaller than 5MB, we can't use multipart upload
+      // Fall back to simple upload (which should work for small files)
+      if (file.size < CHUNK_SIZE) {
+        console.log("File smaller than 5MB, cannot use multipart upload. Using simple upload.");
+        setIsUploading(false);
+        setProgress(0);
+        return uploadFileSimple();
+      }
 
       // Step 1: Initiate upload
       // Construct full URL using current origin
@@ -449,6 +459,15 @@ export default function FileUploader() {
         const end = Math.min(file.size, start + CHUNK_SIZE);
         const blob = file.slice(start, end);
         const partNumber = i + 1;
+        const isLastPart = i === totalParts - 1;
+
+        // R2 requires minimum 5MB per part (except the last part)
+        // Validate part size before uploading
+        if (!isLastPart && blob.size < CHUNK_SIZE) {
+          throw new Error(
+            `Part ${partNumber} is ${(blob.size / 1024 / 1024).toFixed(2)}MB, but R2 requires minimum ${(CHUNK_SIZE / 1024 / 1024)}MB for non-final parts. This should not happen with proper chunking.`
+          );
+        }
 
         // Build URL with minimal query params to avoid 16KB URL limit
         // Keep only essential params in URL, encode properly
@@ -478,6 +497,15 @@ export default function FileUploader() {
 
             if (uploadPartResponse.ok) {
               break; // Success, exit retry loop
+            }
+
+            // Handle 413 error specifically - reverse proxy limit
+            if (uploadPartResponse.status === 413) {
+              throw new Error(
+                `Upload failed: File part is too large for the server (413). ` +
+                `The reverse proxy has a size limit that conflicts with R2's 5MB minimum part size requirement. ` +
+                `Please contact support or try uploading a smaller file.`
+              );
             }
 
             // If not OK and not a retryable error, throw

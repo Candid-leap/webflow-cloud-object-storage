@@ -94,6 +94,36 @@ export const POST: APIRoute = async ({ request, locals }) => {
         }
       }
 
+      case "get-upload-url": {
+        // Generate presigned URL for direct R2 upload (bypasses reverse proxy)
+        // This is a workaround for reverse proxy size limits
+        const parsedData = await parseRequestData(request);
+        const uploadId = parsedData.uploadId as string;
+        const key = parsedData.key as string;
+        const partNumber = parsedData.partNumber as number;
+
+        if (!uploadId || !key || !partNumber) {
+          return API.error("Missing uploadId, key, or partNumber", request, 400);
+        }
+
+        try {
+          const multipartUpload = bucket.resumeMultipartUpload(key, uploadId);
+          // Note: R2 doesn't support presigned URLs for multipart parts
+          // So we'll need to proxy through our backend
+          // For now, return the upload endpoint URL
+          return API.success(
+            {
+              success: true,
+              uploadUrl: request.url.split('?')[0] + `?action=upload-part&uploadId=${encodeURIComponent(uploadId)}&key=${encodeURIComponent(key)}&partNumber=${partNumber}`,
+            },
+            request
+          );
+        } catch (error) {
+          console.error("Failed to get upload URL:", error);
+          return API.error("Failed to get upload URL", request, 500);
+        }
+      }
+
       case "upload-part": {
         // Handle upload-part via POST (for long keys that exceed URL size limit)
         return handleUploadPart(request, locals);
