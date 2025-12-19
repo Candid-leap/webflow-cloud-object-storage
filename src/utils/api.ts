@@ -84,6 +84,10 @@ export const API = {
     if (origin.includes('.webflow.io') || origin.includes('webflow.io')) {
       return true;
     }
+    // Allow cosmic.webflow.services domain (Workers runtime)
+    if (origin.includes('cosmic.webflow.services')) {
+      return true;
+    }
     return API.allowedOrigins.includes(origin);
   },
 

@@ -381,9 +381,10 @@ export default function FileUploader() {
     setProgress(0);
 
     try {
-      // Use base path for API calls, not ASSETS_PREFIX (which might be a different domain)
-      const basePath = getBasePath();
-      const BASE_CF_URL = basePath ? `${basePath}/api/multipart-upload` : '/api/multipart-upload';
+      // Use ASSETS_PREFIX for multipart uploads to bypass reverse proxy (goes directly to Workers runtime)
+      // This matches the original repository pattern and avoids 413 errors
+      const assetsPrefix = import.meta.env.ASSETS_PREFIX || '';
+      const BASE_CF_URL = assetsPrefix ? `${assetsPrefix}/api/multipart-upload` : '/api/multipart-upload';
       // Use custom key if provided, otherwise use file name
       // Use folderPath if provided, otherwise use currentFolder
       const targetFolder = folderPath.trim() || currentFolder;

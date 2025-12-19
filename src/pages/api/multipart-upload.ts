@@ -28,8 +28,18 @@ async function parseRequestData(
 
 // Creates and completes a new multipart upload session
 export const POST: APIRoute = async ({ request, locals }) => {
-  // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  // Set the origin for the API - also add ASSETS_PREFIX to allowed origins for CORS
+  const env = (locals.runtime as any).env;
+  API.init(env.ORIGIN);
+  // Add ASSETS_PREFIX to allowed origins if it's a different domain
+  if (env.ASSETS_PREFIX) {
+    try {
+      const assetsUrl = new URL(env.ASSETS_PREFIX);
+      API.addOrigin(assetsUrl.origin);
+    } catch (e) {
+      // If ASSETS_PREFIX is not a full URL, ignore
+    }
+  }
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
@@ -147,8 +157,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
 // Uploads individual parts of a multipart upload
 export const PUT: APIRoute = async ({ request, locals }) => {
-  // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  // Set the origin for the API - also add ASSETS_PREFIX to allowed origins for CORS
+  const env = (locals.runtime as any).env;
+  API.init(env.ORIGIN);
+  // Add ASSETS_PREFIX to allowed origins if it's a different domain
+  if (env.ASSETS_PREFIX) {
+    try {
+      const assetsUrl = new URL(env.ASSETS_PREFIX);
+      API.addOrigin(assetsUrl.origin);
+    } catch (e) {
+      // If ASSETS_PREFIX is not a full URL, ignore
+    }
+  }
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
