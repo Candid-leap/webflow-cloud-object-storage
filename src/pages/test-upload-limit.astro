@@ -1,0 +1,245 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { isAuthenticated } from '../utils/auth';
+
+const env = Astro.locals.runtime?.env || {};
+// Normalize base path
+const rawBasePath = import.meta.env.BASE_URL || '';
+const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
+
+// Check authentication
+const authenticated = await isAuthenticated(Astro.request, env);
+
+if (!authenticated) {
+	return Astro.redirect(`${basePath}/login`, 302);
+}
+---
+
+<Layout title="Upload Limit Test">
+	<div style="padding: 20px; max-width: 1200px; margin: 0 auto;">
+		<h1 style="margin-bottom: 20px;">Reverse Proxy Upload Limit Tester</h1>
+		<p style="margin-bottom: 20px; color: #666;">
+			This page tests the reverse proxy upload limit by sending blobs of different sizes.
+			It will help us determine the exact size limit for file uploads.
+		</p>
+
+		<div id="test-container" style="margin-top: 30px;">
+			<div style="margin-bottom: 20px;">
+				<button 
+					id="startTestBtn" 
+					style="
+						padding: 12px 24px;
+						background-color: #146ef5;
+						color: white;
+						border: none;
+						border-radius: 8px;
+						cursor: pointer;
+						font-size: 16px;
+						font-weight: 600;
+					"
+				>
+					Start Test
+				</button>
+				<button 
+					id="stopTestBtn" 
+					style="
+						padding: 12px 24px;
+						background-color: #ef4444;
+						color: white;
+						border: none;
+						border-radius: 8px;
+						cursor: pointer;
+						font-size: 16px;
+						font-weight: 600;
+						margin-left: 10px;
+						display: none;
+					"
+				>
+					Stop Test
+				</button>
+			</div>
+
+			<div id="results" style="margin-top: 20px;">
+				<div id="progress" style="margin-bottom: 20px;"></div>
+				<div id="summary" style="margin-top: 20px;"></div>
+				<div id="testResults" style="margin-top: 20px;"></div>
+			</div>
+		</div>
+	</div>
+</Layout>
+
+<script>
+	// Get base path
+	const rawBasePath = import.meta.env.BASE_URL || '';
+	const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
+	
+	const startBtn = document.getElementById('startTestBtn');
+	const stopBtn = document.getElementById('stopTestBtn');
+	const progressDiv = document.getElementById('progress');
+	const summaryDiv = document.getElementById('summary');
+	const resultsDiv = document.getElementById('testResults');
+	
+	let isTesting = false;
+	let testResults = [];
+	let maxSuccessSize = 0;
+	let minFailureSize = Infinity;
+
+	// Test sizes in KB: 100KB, 200KB, 500KB, 1MB, 2MB, 3MB, 4MB, 5MB, 6MB, 7MB, 8MB, 9MB, 10MB
+	const testSizes = [
+		100 * 1024,      // 100KB
+		200 * 1024,      // 200KB
+		500 * 1024,      // 500KB
+		1 * 1024 * 1024, // 1MB
+		1.5 * 1024 * 1024, // 1.5MB
+		2 * 1024 * 1024, // 2MB
+		2.5 * 1024 * 1024, // 2.5MB
+		3 * 1024 * 1024, // 3MB
+		4 * 1024 * 1024, // 4MB
+		5 * 1024 * 1024, // 5MB
+		6 * 1024 * 1024, // 6MB
+		7 * 1024 * 1024, // 7MB
+		8 * 1024 * 1024, // 8MB
+		10 * 1024 * 1024, // 10MB
+	];
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1024) return bytes + ' B';
+		if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+		return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+	}
+
+	async function testSize(size) {
+		// Create a random blob of the specified size
+		const blob = new Blob([new Uint8Array(size).fill(Math.random() * 255)]);
+		
+		// Create FormData
+		const formData = new FormData();
+		formData.append('file', blob, 'test-file.bin');
+		formData.append('key', `test-limit-${size}.bin`);
+
+		const apiPath = basePath ? `${basePath}/api/upload` : '/api/upload';
+		
+		try {
+			const response = await fetch(apiPath, {
+				method: 'POST',
+				credentials: 'include',
+				body: formData,
+			});
+
+			if (response.ok) {
+				return { success: true, status: response.status };
+			} else {
+				const errorText = await response.text().catch(() => response.statusText);
+				return { 
+					success: false, 
+					status: response.status,
+					error: errorText.substring(0, 200) // Limit error text length
+				};
+			}
+		} catch (error) {
+			return { 
+				success: false, 
+				status: 0,
+				error: error instanceof Error ? error.message : 'Unknown error'
+			};
+		}
+	}
+
+	async function runTests() {
+		isTesting = true;
+		startBtn!.style.display = 'none';
+		stopBtn!.style.display = 'inline-block';
+		testResults = [];
+		maxSuccessSize = 0;
+		minFailureSize = Infinity;
+
+		resultsDiv!.innerHTML = '<h3>Test Results:</h3><table style="width: 100%; border-collapse: collapse;"><thead><tr><th style="border: 1px solid #ddd; padding: 8px;">Size</th><th style="border: 1px solid #ddd; padding: 8px;">Status</th><th style="border: 1px solid #ddd; padding: 8px;">Details</th></tr></thead><tbody id="resultsTableBody"></tbody></table>';
+		const tableBody = document.getElementById('resultsTableBody');
+
+		for (let i = 0; i < testSizes.length && isTesting; i++) {
+			const size = testSizes[i];
+			const sizeStr = formatBytes(size);
+			
+			progressDiv!.innerHTML = `<p>Testing ${sizeStr} (${i + 1}/${testSizes.length})...</p>`;
+			
+			const result = await testSize(size);
+			const testResult = {
+				size,
+				status: result.success ? '✅ Success' : `❌ Failed (${result.status})`,
+				error: result.error
+			};
+			
+			testResults.push(testResult);
+
+			if (result.success) {
+				maxSuccessSize = Math.max(maxSuccessSize, size);
+			} else {
+				minFailureSize = Math.min(minFailureSize, size);
+			}
+
+			// Add row to table
+			const row = document.createElement('tr');
+			row.style.backgroundColor = result.success ? '#d4edda' : '#f8d7da';
+			row.innerHTML = `
+				<td style="border: 1px solid #ddd; padding: 8px;">${sizeStr}</td>
+				<td style="border: 1px solid #ddd; padding: 8px;">${testResult.status}</td>
+				<td style="border: 1px solid #ddd; padding: 8px;">${testResult.error || '-'}</td>
+			`;
+			tableBody!.appendChild(row);
+
+			// Update summary
+			updateSummary();
+
+			// Small delay between tests
+			await new Promise(resolve => setTimeout(resolve, 500));
+		}
+
+		isTesting = false;
+		startBtn!.style.display = 'inline-block';
+		stopBtn!.style.display = 'none';
+		progressDiv!.innerHTML = '<p style="color: green; font-weight: bold;">Test completed!</p>';
+	}
+
+	function updateSummary() {
+		let summary = '<h3>Summary:</h3><ul>';
+		
+		if (maxSuccessSize > 0) {
+			summary += `<li><strong>Maximum successful size:</strong> ${formatBytes(maxSuccessSize)}</li>`;
+		}
+		
+		if (minFailureSize < Infinity) {
+			summary += `<li><strong>Minimum failed size:</strong> ${formatBytes(minFailureSize)}</li>`;
+		}
+		
+		if (maxSuccessSize > 0 && minFailureSize < Infinity) {
+			const limit = (maxSuccessSize + minFailureSize) / 2;
+			summary += `<li><strong>Estimated limit:</strong> ~${formatBytes(limit)}</li>`;
+		}
+		
+		summary += '</ul>';
+		summaryDiv!.innerHTML = summary;
+	}
+
+	startBtn!.addEventListener('click', () => {
+		runTests();
+	});
+
+	stopBtn!.addEventListener('click', () => {
+		isTesting = false;
+		startBtn!.style.display = 'inline-block';
+		stopBtn!.style.display = 'none';
+		progressDiv!.innerHTML = '<p style="color: orange;">Test stopped by user.</p>';
+	});
+</script>
+
+<style>
+	table {
+		margin-top: 10px;
+	}
+	
+	th {
+		background-color: #f8f9fa;
+		font-weight: 600;
+	}
+</style>
+
