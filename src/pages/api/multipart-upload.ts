@@ -47,7 +47,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // Check authentication
-  const env = (locals.runtime as any).env;
   const authenticated = await isAuthenticated(request, env);
   if (!authenticated) {
     return API.error("Authentication required", request, 401);
