@@ -417,7 +417,9 @@ export default function FileUploader() {
           ? `${targetFolder}/${fileName}`
           : fileName;
       }
-      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+      // Use smaller chunks (2MB) to stay well under limits and avoid URL size issues
+      // Webflow Cloud limits: 500MB request body, 16KB URL, 30s timeout
+      const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB - safer chunk size
       const totalParts = Math.ceil(file.size / CHUNK_SIZE);
 
       // Step 1: Initiate upload
@@ -448,13 +450,60 @@ export default function FileUploader() {
         const blob = file.slice(start, end);
         const partNumber = i + 1;
 
-        const uploadPartUrl = `${baseUploadUrl}?action=upload-part&uploadId=${encodeURIComponent(uploadId)}&key=${encodeURIComponent(key)}&partNumber=${partNumber}`;
+        // Build URL with minimal query params to avoid 16KB URL limit
+        // Keep only essential params in URL, encode properly
+        const uploadPartUrl = new URL(baseUploadUrl);
+        uploadPartUrl.searchParams.set("action", "upload-part");
+        uploadPartUrl.searchParams.set("uploadId", uploadId);
+        uploadPartUrl.searchParams.set("key", key);
+        uploadPartUrl.searchParams.set("partNumber", partNumber.toString());
 
-        const uploadPartResponse = await fetch(uploadPartUrl, {
-          method: "PUT",
-          credentials: 'include',
-          body: blob,
-        });
+        // Check if URL is too long (approaching 16KB limit)
+        if (uploadPartUrl.toString().length > 15000) {
+          throw new Error(`URL too long (${uploadPartUrl.toString().length} bytes). Key may be too long.`);
+        }
+
+        let retries = 3;
+        let uploadPartResponse: Response | null = null;
+        
+        while (retries > 0) {
+          try {
+            uploadPartResponse = await fetch(uploadPartUrl.toString(), {
+              method: "PUT",
+              credentials: 'include',
+              body: blob,
+              // Add timeout signal (25 seconds to be safe, under 30s limit)
+              signal: AbortSignal.timeout(25000),
+            });
+
+            if (uploadPartResponse.ok) {
+              break; // Success, exit retry loop
+            }
+
+            // If not OK and not a retryable error, throw
+            if (uploadPartResponse.status !== 408 && uploadPartResponse.status !== 429 && uploadPartResponse.status < 500) {
+              throw new Error(`Upload part failed: ${uploadPartResponse.status} ${uploadPartResponse.statusText}`);
+            }
+
+            // Retryable error - wait and retry
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries))); // Exponential backoff
+            }
+          } catch (error: unknown) {
+            retries--;
+            if (retries === 0) {
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              throw new Error(`Failed to upload part ${partNumber} after retries: ${errorMessage}`);
+            }
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
+          }
+        }
+
+        if (!uploadPartResponse || !uploadPartResponse.ok) {
+          throw new Error(`Failed to upload part ${partNumber}`);
+        }
 
         const uploadPartJson = (await uploadPartResponse.json()) as {
           etag: string;

@@ -94,6 +94,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
         }
       }
 
+      case "upload-part": {
+        // Handle upload-part via POST (for long keys that exceed URL size limit)
+        return handleUploadPart(request, locals);
+      }
+
       case "complete": {
         // Complete a multipart upload
         const parsedData = await parseRequestData(request);
@@ -147,7 +152,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 };
 
 // Uploads individual parts of a multipart upload
+// Supports both PUT (with params in URL) and POST (with params in body) to handle long keys
 export const PUT: APIRoute = async ({ request, locals }) => {
+  return handleUploadPart(request, locals);
+};
+
+// Shared handler for uploading parts (used by both PUT and POST)
+async function handleUploadPart(request: Request, locals: any) {
   // Set the origin for the API - use ORIGIN from env for CORS
   API.init((locals.runtime as any).env.ORIGIN);
 
@@ -178,9 +189,36 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       return API.error(`Unknown action: ${action}`, request, 400);
     }
 
-    const uploadId = url.searchParams.get("uploadId");
-    const partNumberStr = url.searchParams.get("partNumber");
-    const key = url.searchParams.get("key");
+    let uploadId: string | null;
+    let partNumberStr: string | null;
+    let key: string | null;
+
+    // Try to get params from URL first (for PUT requests)
+    uploadId = url.searchParams.get("uploadId");
+    partNumberStr = url.searchParams.get("partNumber");
+    key = url.searchParams.get("key");
+
+    // If not in URL, try to get from request body (for POST requests with long keys)
+    if (!uploadId || !partNumberStr || !key) {
+      try {
+        const contentType = request.headers.get("content-type") || "";
+        // Check if body contains JSON metadata (multipart/form-data or JSON)
+        if (contentType.includes("application/json")) {
+          // For JSON, we need to handle it differently - the body contains both metadata and file data
+          // This is complex, so for now we'll require URL params
+          // But we can support multipart/form-data
+        } else if (contentType.includes("multipart/form-data")) {
+          // For multipart, metadata might be in form data
+          const formData = await request.formData();
+          uploadId = uploadId || (formData.get("uploadId") as string | null);
+          partNumberStr = partNumberStr || (formData.get("partNumber") as string | null);
+          key = key || (formData.get("key") as string | null);
+        }
+      } catch (e) {
+        // If we can't parse body, continue with URL params only
+        console.log("Could not parse body for metadata, using URL params only");
+      }
+    }
 
     if (!uploadId || !partNumberStr || !key) {
       return API.error("Missing uploadId, partNumber, or key", request, 400);
@@ -221,7 +259,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     console.error("Upload part error:", error);
     return API.error("Upload part failed", request, 500);
   }
-};
+}
 
 // Aborts a multipart upload
 export const DELETE: APIRoute = async ({ request, locals }) => {

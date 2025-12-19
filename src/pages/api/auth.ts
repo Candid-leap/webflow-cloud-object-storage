@@ -63,8 +63,7 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
     // Build redirect URL - use absolute URL to ensure proper redirect
     // Reuse the existing url variable from line 12
     const origin = url.origin;
-    const redirectPath = basePath || '/';
-    const redirectUrl = `${origin}${redirectPath}`;
+    const redirectUrl = `${origin}`;
 
     // Create redirect response
     const response = new Response(null, {
