@@ -385,6 +385,26 @@ export default function FileUploader() {
       // This matches the original repository pattern and avoids 413 errors
       const assetsPrefix = import.meta.env.ASSETS_PREFIX || '';
       const BASE_CF_URL = assetsPrefix ? `${assetsPrefix}/api/multipart-upload` : '/api/multipart-upload';
+      
+      // For cross-domain requests (ASSETS_PREFIX is different domain), get JWT token for Authorization header
+      let authToken: string | null = null;
+      if (assetsPrefix && assetsPrefix.startsWith('http')) {
+        try {
+          const basePath = getBasePath();
+          const tokenUrl = basePath ? `${basePath}/api/auth/token` : '/api/auth/token';
+          const tokenResponse = await fetch(tokenUrl, {
+            method: 'GET',
+            credentials: 'include',
+          });
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json() as { token: string };
+            authToken = tokenData.token;
+          }
+        } catch (error) {
+          console.warn("Failed to get auth token for cross-domain request:", error);
+          // Continue without token - will fail with 401 if auth is required
+        }
+      }
       // Use custom key if provided, otherwise use file name
       // Use folderPath if provided, otherwise use currentFolder
       const targetFolder = folderPath.trim() || currentFolder;
@@ -443,11 +463,17 @@ export default function FileUploader() {
       console.log("BASE_CF_URL:", BASE_CF_URL);
       console.log("ASSETS_PREFIX:", import.meta.env.ASSETS_PREFIX);
 
+      // Prepare headers - include Authorization if we have a token (for cross-domain)
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
+
       let createResponse: Response;
       try {
         createResponse = await fetch(createUploadUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           credentials: 'include',
           mode: 'cors', // Explicitly enable CORS
           body: JSON.stringify({ key, contentType: file.type }),
@@ -503,6 +529,12 @@ export default function FileUploader() {
           throw new Error(`URL too long (${uploadPartUrl.toString().length} bytes). Key may be too long.`);
         }
 
+        // Prepare headers for part upload - include Authorization if we have a token (for cross-domain)
+        const partHeaders: Record<string, string> = {};
+        if (authToken) {
+          partHeaders["Authorization"] = `Bearer ${authToken}`;
+        }
+
         let retries = 3;
         let uploadPartResponse: Response | null = null;
         
@@ -510,7 +542,9 @@ export default function FileUploader() {
           try {
             uploadPartResponse = await fetch(uploadPartUrl.toString(), {
               method: "PUT",
+              headers: partHeaders,
               credentials: 'include',
+              mode: 'cors',
               body: blob,
               // Add timeout signal (25 seconds to be safe, under 30s limit)
               signal: AbortSignal.timeout(25000),
@@ -571,10 +605,17 @@ export default function FileUploader() {
         ? `${BASE_CF_URL}?action=complete`
         : `${window.location.origin}${BASE_CF_URL}?action=complete`;
 
+      // Prepare headers for complete - include Authorization if we have a token (for cross-domain)
+      const completeHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (authToken) {
+        completeHeaders["Authorization"] = `Bearer ${authToken}`;
+      }
+
       const completeResponse = await fetch(completeUploadUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: completeHeaders,
         credentials: 'include',
+        mode: 'cors',
         body: JSON.stringify({
           uploadId,
           key,

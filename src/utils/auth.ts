@@ -136,13 +136,23 @@ function deleteCookie(headers: Headers, name: string): void {
 
 /**
  * Check if request has valid JWT
+ * Checks both cookie (for same-domain) and Authorization header (for cross-domain)
  */
 export async function getAccessTokenFromRequest(
   request: Request,
   env: Env
 ): Promise<string | null> {
   try {
-    const jwtToken = getCookie(request, JWT_COOKIE);
+    // First try to get token from cookie (same-domain requests)
+    let jwtToken = getCookie(request, JWT_COOKIE);
+
+    // If no cookie, try Authorization header (cross-domain requests)
+    if (!jwtToken) {
+      const authHeader = request.headers.get('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        jwtToken = authHeader.substring(7); // Remove 'Bearer ' prefix
+      }
+    }
 
     if (!jwtToken) {
       return null;
