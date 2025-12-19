@@ -14,6 +14,7 @@ export const API = {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...API.corsHeaders,
+      "Access-Control-Allow-Credentials": "true",
     };
 
     // Handle dynamic origin if request is provided
@@ -58,6 +59,7 @@ export const API = {
           headers: {
             ...API.corsHeaders,
             "Access-Control-Allow-Origin": origin || "",
+            "Access-Control-Allow-Credentials": "true",
           },
         });
       }
@@ -66,7 +68,10 @@ export const API = {
     console.log("CORS check - Using default headers");
     return new Response(null, {
       status: 200,
-      headers: API.corsHeaders,
+      headers: {
+        ...API.corsHeaders,
+        "Access-Control-Allow-Credentials": "true",
+      },
     });
   },
 

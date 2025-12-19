@@ -434,19 +434,39 @@ export default function FileUploader() {
       }
 
       // Step 1: Initiate upload
-      // Construct full URL using current origin
+      // ASSETS_PREFIX is already a full URL (e.g., https://xxx.wf-app-prod.cosmic.webflow.services/app)
       const createUploadUrl = BASE_CF_URL.startsWith('http')
         ? `${BASE_CF_URL}?action=create`
         : `${window.location.origin}${BASE_CF_URL}?action=create`;
 
-      const createResponse = await fetch(createUploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: 'include',
-        body: JSON.stringify({ key, contentType: file.type }),
-      });
+      console.log("Creating multipart upload at:", createUploadUrl);
+      console.log("BASE_CF_URL:", BASE_CF_URL);
+      console.log("ASSETS_PREFIX:", import.meta.env.ASSETS_PREFIX);
+
+      let createResponse: Response;
+      try {
+        createResponse = await fetch(createUploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: 'include',
+          mode: 'cors', // Explicitly enable CORS
+          body: JSON.stringify({ key, contentType: file.type }),
+        });
+      } catch (error) {
+        console.error("Network error creating multipart upload:", error);
+        throw new Error(`Failed to connect to upload endpoint: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text().catch(() => createResponse.statusText);
+        console.error("Create multipart upload failed:", createResponse.status, errorText);
+        throw new Error(`Failed to create multipart upload: ${createResponse.status} ${errorText}`);
+      }
 
       const createJson = (await createResponse.json()) as { uploadId: string };
+      if (!createJson.uploadId) {
+        throw new Error("No uploadId returned from create request");
+      }
       const uploadId = createJson.uploadId;
 
       // Step 2: Upload parts
