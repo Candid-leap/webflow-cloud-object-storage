@@ -15,6 +15,7 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
 
     const env = (locals.runtime as any).env;
     // Normalize base path (remove trailing slash if present, except for root)
+    // Use import.meta.env.BASE_URL which is set by Astro from astro.config.mjs
     const rawBasePath = import.meta.env.BASE_URL || '';
     const basePath = rawBasePath === '/' ? '' : rawBasePath.replace(/\/$/, '');
 
@@ -60,10 +61,16 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
     }
 
     // Create JWT with site ID and set cookie
-    // Build redirect URL - use absolute URL to ensure proper redirect
-    // Reuse the existing url variable from line 12
-    const origin = url.origin;
-    const redirectUrl = `${origin}`;
+    // Build redirect URL - use absolute URL with basePath to ensure proper redirect
+    // IMPORTANT: Use the ORIGIN from env to ensure we redirect to the correct domain
+    // (not cosmic.webflow.services, but the main webflow.io or custom domain)
+    const redirectOrigin = env.ORIGIN || url.origin;
+    // Include basePath in redirect URL (e.g., /app or empty string)
+    const redirectPath = basePath || '/';
+    const redirectUrl = `${redirectOrigin}${redirectPath}`;
+
+    console.log('OAuth success - redirecting to:', redirectUrl);
+    console.log('Cookie will be set on domain:', redirectOrigin);
 
     // Create redirect response
     const response = new Response(null, {
@@ -74,6 +81,7 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
     });
     
     // Set cookie on the redirect response
+    // The cookie domain should match the redirect origin
     await setTokenWithPayload(response.headers, { site_id: siteId }, env);
 
     return response;
