@@ -9,7 +9,8 @@ import { getAccessTokenFromRequest } from '../../../utils/auth';
  */
 export const GET: APIRoute = async ({ request, locals }) => {
   // Set the origin for the API
-  API.init((locals.runtime as any).env.ORIGIN);
+  const env = (locals.runtime as any).env;
+  API.init(env.ORIGIN);
 
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
@@ -17,7 +18,23 @@ export const GET: APIRoute = async ({ request, locals }) => {
   }
 
   try {
-    const env = (locals.runtime as any).env;
+    // This endpoint should only be accessed from the main domain (where cookies are set)
+    // Not from ASSETS_PREFIX (cosmic.webflow.services) domain
+    const requestUrl = new URL(request.url);
+    const assetsPrefix = env.ASSETS_PREFIX || '';
+
+    // If ASSETS_PREFIX is set and the request is coming from that domain, reject it
+    // The token endpoint should only be called from the main domain (webflow.io or custom domain)
+    if (assetsPrefix) {
+      try {
+        const assetsUrl = new URL(assetsPrefix);
+        if (requestUrl.origin === assetsUrl.origin) {
+          return API.error("This endpoint should not be accessed from ASSETS_PREFIX domain", request, 400);
+        }
+      } catch (e) {
+        // If ASSETS_PREFIX is not a valid URL, ignore this check
+      }
+    }
     
     // Check if user is authenticated (has valid JWT cookie)
     const token = await getAccessTokenFromRequest(request, env);

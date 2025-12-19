@@ -97,14 +97,28 @@ export const API = {
   },
 
   // Initialize API with base URL from environment
+  // baseUrl should be the ORIGIN (e.g., https://your-site.webflow.io or https://custom-domain.com)
   init: (baseUrl?: string) => {
     console.log("API.init called with baseUrl:", baseUrl);
     console.log("Initial allowed origins:", API.allowedOrigins);
 
     // Add the base URL to allowed origins if provided
-    if (baseUrl && !API.allowedOrigins.includes(baseUrl)) {
-      console.log("Adding baseUrl to allowed origins:", baseUrl);
-      API.addOrigin(baseUrl);
+    // This supports both webflow.io domains and custom domains
+    if (baseUrl) {
+      try {
+        const baseUrlObj = new URL(baseUrl);
+        const origin = baseUrlObj.origin;
+        if (!API.allowedOrigins.includes(origin)) {
+          console.log("Adding baseUrl origin to allowed origins:", origin);
+          API.addOrigin(origin);
+        }
+      } catch (e) {
+        // If baseUrl is not a valid URL, try adding it as-is
+        if (!API.allowedOrigins.includes(baseUrl)) {
+          console.log("Adding baseUrl to allowed origins (as-is):", baseUrl);
+          API.addOrigin(baseUrl);
+        }
+      }
     }
 
     console.log("Final allowed origins:", API.allowedOrigins);

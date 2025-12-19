@@ -143,7 +143,7 @@ export default function FileUploader() {
   }, [currentFolder]);
 
   // Simple upload function
-  const uploadFileSimple = async () => {
+  const uploadFileSimple = async (): Promise<void> => {
     const file = selectedFile || (document.getElementById("fileUpload") as HTMLInputElement)?.files?.[0];
 
     if (!file) {
@@ -312,7 +312,7 @@ export default function FileUploader() {
   };
 
   // Multipart upload function
-  const uploadFileMultipart = async () => {
+  const uploadFileMultipart = async (): Promise<void> => {
     const file = selectedFile || (document.getElementById("fileUpload") as HTMLInputElement)?.files?.[0];
 
     if (!file) {
@@ -387,14 +387,20 @@ export default function FileUploader() {
       const BASE_CF_URL = assetsPrefix ? `${assetsPrefix}/api/multipart-upload` : '/api/multipart-upload';
       
       // For cross-domain requests (ASSETS_PREFIX is different domain), get JWT token for Authorization header
+      // IMPORTANT: Always fetch the token from the current origin (main domain), not from ASSETS_PREFIX
       let authToken: string | null = null;
-      if (assetsPrefix && assetsPrefix.startsWith('http')) {
+      if (assetsPrefix && typeof assetsPrefix === 'string' && assetsPrefix.startsWith('http')) {
         try {
           const basePath = getBasePath();
-          const tokenUrl = basePath ? `${basePath}/api/auth/token` : '/api/auth/token';
+          // Always use current origin (window.location.origin) to ensure we're calling the token endpoint
+          // on the same domain where the cookie is set, not on cosmic.webflow.services
+          const tokenUrl = basePath
+            ? `${window.location.origin}${basePath}/api/auth/token`
+            : `${window.location.origin}/api/auth/token`;
           const tokenResponse = await fetch(tokenUrl, {
             method: 'GET',
             credentials: 'include',
+            mode: 'cors',
           });
           if (tokenResponse.ok) {
             const tokenData = await tokenResponse.json() as { token: string };
